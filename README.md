@@ -73,9 +73,9 @@ Algo
 		- Geospatial DB: GeoHash in Redis, Postgres PostGIS
 	- 2D search
 		- Draw cirlce : SQL where on lat & long
-		- 2col search is slow
+		- 2col search is slow even after indexing
 		- geospatial indexing
-	- Evenly divided grid
+	- Evenly divided grid (divide world in small grid)
 		- Issue: 
 			- Distb of biz is not even
 			- Ideally more granular in dense areas & large in sparse areas
