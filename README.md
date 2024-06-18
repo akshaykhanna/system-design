@@ -1,1 +1,1241 @@
-# system-design
+# System Design
+
+
+Core Topics to Cover
+- Master Slave DB
+- CDN 
+- Fuzzy Search (Elastic Search)
+- Analytics (Hadoop & spark
+- Message Queues (Kafka)
+- Horizontal + Vertical scable
+- Redis
+	- TTL
+- Monitoring (Graphana)
+- Load Balancer
+	- Reverse Proxy
+	- Authori nd Authen
+- Websocket
+
+## Promixty Service
+Context
+- Nearbuy places
+- Eg
+	- Nearest resturatant : Yelp
+	- k-nearest: google map
+Q
+- Support a search radius (eg: 20km)
+- Can change radious
+- Buisness can be add/del/upd not on real time
+- Ignore user moving speed
+FR
+- Return all buiss on user loc (lat,long,<=radius)
+- Buiss owners can be add/del/upd  & reflected not on real time
+- Cust can view detail info abt biz
+NFR
+- Low latency: fast search
+- Data privacy of user loc
+- High availabilty + scalability (spike in densly populated area or in peak hrs)
+
+BOEnvEst
+- 100 M active users
+- 200 M bizs
+- Sec in day =24*60*60 = 86400 ~= 10^5
+- QPS: ( 100 M  * 5) / Sec in day = 5000
+
+API
+- v1/search/nearby?lat=,long=,rad= (GET)
+	- {toats: , bizs: [] }
+- /v1/business
+	- get/:id (bizID)
+	- post
+	- put/:id
+	- del/:id
+
+Data Mod Desg
+- R/W  >>>
+- MySQL (read heavy sys)
+- Table
+	- Biz(id, add, city,..., lat,long)
+	- Geo Index 
+		- Geo Hash
+		- BizId
+HLD
+
+LocBasedServ..
+- Read heavy
+- QPS >>
+- Stateless
+Biz SerV
+- CUD
+- Show detail info (QPS is high on peak)
+Algo
+- Fetch Nearby Biz
+		- Geospatial DB: GeoHash in Redis, Postgres PostGIS
+	- 2D search
+		- Draw cirlce : SQL where on lat & long
+		- 2col search is slow
+		- geospatial indexing
+	- Evenly divided grid
+		- Issue: 
+			- Distb of biz is not even
+			- Ideally more granular in dense areas & large in sparse areas
+	- Geohash
+		- 2d (lat,long) -> 1d
+		- Recursively divide the word into smaller grids
+		- Start  by 4 Quarters & divide further
+		- Geohash len b/w 4 & 6 isok
+		- Boundary Issues
+			- 2 close loc can have diff geohashes (in diff cell)
+		- Issue: 
+		- Not Enough  Biz
+			- Have toAsk fo rInc search radius
+		- Cannot adjust dynamically based on density
+	- Quadtree
+		- recusrive dividing in qudrants till each quadrant  has threshold(k) of max biz
+		- Search
+			- start from root of tree
+		- Benfits
+			- Supp k-nearest bizz search
+		- Issue: 
+			- Take memory space & few mins on start build quad tree
+	- Google S2
+		- Used by Google , Tinder
+		- Geofencing
+
+
+
+Scale DB
+- Biz table
+	- Data is huge may not fit in 1 server
+	- Sharding
+		- Shard by biz Id col
+- Geo index table
+	- geospatail_index table
+		- geohash
+		- biz_id
+		- PK(geohash, biz_id)
+	- Scale
+		- Database is not that much large can do without shard (1.71G)
+		- Need more CPU to read so can add  series of replicas
+	- Caching
+		- Cache 
+			- Can use redis cache
+			- GeoHash Data
+				- Key
+					- Geohash: 
+				- Value
+					- [Buissnees ids]]
+			- Buissnees Data
+				- Key
+					- Buissnees_id
+				- Value
+					- Buissnees Obj (name, add, urls ...)
+			- When biz altered invalidate cache
+FHLD
+
+
+Nearby Friends
+FR
+- Able see nearby frnds with distance
+- Nearby frnd list updated every few secs
+NFR
+- Low latency: loc update of  frnds
+- Reliable
+- Eventual Consultancy
+Back of env
+
+
+
+## Tiny URL
+
+FR
+- Long Url -> Short URL
+- Redirect long URL
+
+NFR
+- Highly Available
+- Very Low Latency
+
+
+# Key Point of Design Interview (DI)
+- Never create single point of failure (SPF)
+
+Length of Short URL
+- Depends scale of app (Google  or big scale) & duration you have to support ( make system for 10 years)
+- X request to generate urls comes every sec 
+- X*60*60*24*365*10 = Y
+- Can use char :( a-z, A-Z, 0-9) 62 char
+- Length of Char 1 -> 62, 2 -> 62^2,  62^n > Y
+- 62^6-> 58 Billon, 62^7 -> 75 Trillon, ans = 7 char ( a-z, A-Z, 0-9)
+
+
+Architecture
+- How Short URL service generate short URL ?
+	- If multiple Short URL sevice genrate the same shortURL then its a problem
+	- Need: Predictable of way generating shortURL so that there is no collision
+	- Possible solution
+		- Redis
+			- Use  counter in Redis to gen uniq URL 
+			- Use multiple redis
+			- Give series to each redis,
+			- But how to dyanmically add/remove redis node
+		- Token Service (valid solution)
+			- Incrementing number can cause collision
+			- Create Token service  to generate ranges to each instance of Short Url service (SUS).
+			- Token service (TS ) will run on single threaded model
+			- Eg: SUS1 -> (1-1000), SUS2 -> (1001 - 2000)
+			- Whenever ranges is exhausted by SUS instance, it can ask another range from TS
+			- TS will run on low scale so MySql can use maintain range DB.
+			- Reduce request to TS can have huge range
+			- Have multiple instance of TS to avoide SPF
+			- TS can distributes across geographies
+			- If SUS goes down, will restart & get new range, even if we loose some (1000) tokens  of 3.7 Trillon it is ok (just like taken bucket out of ocean)
+			- 
+- Why Cassandra ?
+	- URLs Data is quite large
+- Addon: Matrix & geography based usage & analytics 
+	- Request with Short Url  (hitting short UURL) 
+		- User
+		- Source ip
+			- Country
+			- Device type
+		- Headers
+		- Can put this meta data in Kafka in parallel  call (paralle call to avoid latency)
+		- Async writes this meta data on Kafka
+		- Might loose some data, but it is ok
+		- Instead of directly writing to kata, save it locally first and after a timeout can move to Kafka
+		- This will help to reduce I/O by sending batch of data at frequent intervals
+	- Dump all Kafka data in Hadoop which can do aggregate analysis
+	- Or can use spark job for same
+
+
+
+
+## AirBnb/Booking.com / Hotel Booking System
+
+- FR
+	- Hotel Mangers
+		- Onboard rooms
+		- Updates
+		- Bookings
+	- User
+		- Search for room
+		- Book
+		- Check/View Booking
+	- Analytics
+- NFR
+	- Low latency
+	- High availability
+	- High Consistency
+	- Scale
+		- 500k hotels in whole world
+		- 10 Million rooms
+		- 1000 Rooms / hotel
+- HLD
+	- UI for Hotel Manger
+		- LB
+		- Hotel Service (Onboarding, multiple nodes)
+			- Modification will go to Kafka
+				- Added new room will add to Kafka
+		- First  MySQL Cluster (1 Master & multiple slave) (Image URL from CDN)
+		- CDN: Store  Images
+	- UI for User (Search & book UI)
+		- LB
+		- Search 
+			- Search Consumer Service
+				- Pulls data from kafka cluster
+				- Update ES Cluster
+			- Fuzzy Search: Elastic search
+			- Elastic Search (ES) Cluster DB
+			- Search Service
+				- Send tat or search filter as 
+		- Booking Service
+			- Second (separate)  MySQL Cluster
+			- PaymentService
+			- On booking it sent to Kafka
+		- Notification Service
+			- Post booking notify consumer 
+			- Pulls / Pushs  data from kafka cluster
+			- On cancel or update
+		- Archival Service
+				- Old booking are moved here
+				- Cassandra Cluster (Parition key on Booking ID)
+	- Readonly UI
+		- Booking Mgmt Service
+			- Reads from
+				- Redis on Booking MySQL cluster (B2C)
+				- Cassandra Archive Cluster
+	- Analytics
+		- Events in Kafka are logged
+		- Spark stream consumer
+		- To Hadoop cluster
+- Defining Components
+	- Hotel Service
+		- API
+			- Post : /hotels
+			- Get :/hotels/id
+			- Put : / hotels/id
+			- Put / /hotels/id/rooms/id
+		- DB
+			- Hotel (id’, name, locality_id'', desc, org_images, display_images, isActive)
+			- Rooms (id’, hotel_id, isActive, qty, price_min, price_max)
+				- Do ML on Hadoop data, based on demand calc optimal price
+			- Facilities
+			- room_facility
+			- hotel_facility
+			- Locality
+	- Booking Servic  e
+		- DB
+			- Available_rooms [room_id, date, intail_qty, availalbe_qty(>0)]
+				- availalbe_qty for particular room & particular date
+			- Booking [bookingId, roomId, userID, startDate, endDate, noOfRooms, status, invoice_id]
+			- Status - [Reserved, Booked(after successfull payment), Cancelled (after failed payment), Completed]
+		- API
+			- Post /book (userID, roomId, qty, startDate, endDate)
+			- 
+			- 
+		- 
+		- 
+		- 
+		- 
+		- Booking HLD
+			- Booking Service
+				- Check for Availability
+				- Blocking of room (Use Reddis TTL)
+					- Booking Table row: 
+						- noOfRooms, status: Reserved
+						- Availble_rooms : qty --
+						- Above 2 part of single Trans
+						- After 5 min if not booked Unblock
+							- TTL Redis key expire & gets callback for it
+							- Possibility
+								- Payment Success: Booking Status: booked, invoiced ID
+								- Pay Failed:  Booking Status: cacelled, no  invoiced ID, revert available quantity
+								- Key Expire, after Pay Succ: Don’t do anything
+								- Key Expire, Before Pay Succ:  
+									- Either Cancelled Order, Revert Payment & qty ++
+									- Or Book order again
+								- Optimise: After Payment response evict Redis key
+		- Monitoring (CPU Utilisation, Hits)
+			- Graphana Elect
+			- Metrics threshold alert
+			- Memory Utilisation
+			- Alert if any NFR suffers
+		- Data Centres
+			- Low latency & High Availability
+			- R1 (DC1`, DC2) | R2 (DC3`, DC4) …. Rn(DC1, DC2)  {Region - R, DC - Data Center, `  -  Primary}
+			- Data is replicate from DC` to other DC in same R
+			- Hotel data is specific to a geography
+			- 
+			  
+  
+
+
+## Amazon / E-commerce Website
+
+- FR
+	- Search for product to buy
+	- Search prod is deliverable in his location or not
+	- Cart/Wishlist
+	- Checkout/Buy
+	- View there past Orders
+- NFR
+	- Low latency
+	- Highly Availabilty
+		- Search at cost of Consitency
+	- Highly Consistency
+		- Payment &  Inventory at cost Availabilty
+- HLD
+	- Search flow
+		- UI
+			- Home Screen
+				- Recommendations
+				- Most popular
+			- Search Page
+				- Texbox
+		- LB Reverse proxy Auth & Authorisation layers in b/w
+		- Inbound Service
+			- Supplier Service
+			- Adding new products
+			- Send data to kafka 
+		- Kafka
+			- Get inbound service supplier data
+			- Search consumer
+			- On each search query it is been passed to Kafka
+		- Item Service
+			- Onboard new items
+			- CRUD for a item
+			- Get Bulk items
+			- DB
+				- MonogDb
+					- Non structured data : Item info have different attribute
+					- Eg Shirt: Size + Color, Television: Screen Size , Display, Breasd: Wheat,Weight, Bake
+		- Search Consumer
+			- Pull from kafka
+			- Make sure item is now available by user to query on
+			- Read items -> puts format ->search systetme understand
+			- DB: Elastic Search
+				- Search on diff variable & fuzzy service
+		- Search Service
+			- Interface of searching
+			- Contract b/w Search service & consumer is fixed
+			- Each Search event (query) is send to kafka
+		- Servicieabilty + TAT Service
+			- Check wether Order is delivered from warehouse to customer pincode
+			- How much time it will be delivered
+			- Use some shortest path algo to deternine this
+			- Search Service will filter out records based on it
+		- User Service
+			- User Default or all address
+			- MySQL DB
+			- Redis Cache
+			- <- Redis - MySQL
+		- WishList Service
+			- Add/ Del to wishlist
+			- Sent add events to kafka
+			- MySQL DB
+		- Cart Service
+			- Add/ Del to cart
+			- MySQL DB
+			- Sent add events to kafka
+		- Spark Streaming Consumer
+			- Pulls data from kafka
+			- Reports
+				- Most bought item
+				- Most Wishlist prod
+				- Most sort of product in particular category
+			- Add Data in Hadoop
+			- Run ML Algorithm
+				- What other product this user might lke
+				- What similar product brought by other user who bought this product
+		- Recommendation Service
+			- General recommendation for user
+			- Category based recommendation for a user
+		- Logistic Service
+				- List 
+					- of pincodeds
+					- Couries parteners
+		- Warehouse Service
+			- Repo of all items in warehouse
+	- User Purchase Flow
+		- UI
+		- Order Taking Service
+			- MySQL DB
+				- Order (id, timeStamp, status)
+				- Only active orders
+			- Redis
+				- Entry of order id with expiry time 
+			- Status
+				- Created, Placed, Cancelled
+			- Sends event to kafak
+		- Payment Service
+			- Payment gateways
+			- Outcome
+				- Succ
+		- Inventory Service
+			- Block Inventory
+				- Decrement 
+				- Inventory
+			- 1 TV for 3 user Concurrency
+			- DB
+				- My SQL
+				- Once the order is develivered / terminal state move it to Cassandra
+					- Cassandra
+			- Order Processing Service
+				- Pulldata from MY SQL DB
+			- Historical Order Service
+				- Casandara DB
+					- Small finite queries
+					- Large Set of Data
+			- Archival Service
+				- Read & del non active order from Order Processing Service
+				- Add non active orders to Historical Order Service
+			- Orders View
+				- Pull data from 
+					- Order Processing Service
+					- Historical Order Service
+			- Notification Service
+				- Pulls events from kafka
+			- Spark Streming Service
+				- Pulls data from Kafka
+				- Reporting mech
+				- Puts data in Hadoop cluster
+			- Spark Jobs
+				- Pulls data from Hadoop cluster
+				- Send data to Recomendation service
+		- Possibilites
+			- Payment Succesfull (PS) -> Order Placed  -> Event sent to Kafka
+			- Payment Sucess -> Delete expire event from Redis
+			- PaymentFailed -> Order Cancelled  -> Inc Qty ++ (rollback) -> Event sent to Kafka
+			- PaymentTimeout (Redis Expire)  > Order Cancelled  -> Inc Qty ++ (rollback) -> Event sent to Kafka
+			- PS < Expiry (E) -> delete TTL in reddis
+			- E < PS -> can do multiple thing : refund money or create order
+			- Reconciliation Flow
+		- 
+
+
+## WhatsApp / Chat Messenger
+
+- FR
+	- 1 -  1 chat
+	- Group chat
+	- Text/Image/Videos
+	- Read Receipt
+	- Last Seen
+- NFR
+	- Low latency (realtime)
+	- High Availability
+	- No lag
+	- Scale
+		- 2 billon user
+		- 1.6 billon MAV (Monthly Active Users)
+		- 65 billon message each day
+- HLD
+	- User UI
+		- Mobiile
+		- Website
+		- User(U)1 -> U2 (Msg Id)
+	- WebSocket (WS) handler (H)
+		- Server keeping open connection for live users
+		- Eg each web socket machine can handle 60k open connection
+		- Distribueted accorsi global,
+		- U1 - WS1 - U2
+		- Send message to other WSH
+		- Send message to user device
+		- Bidirecltional connection build over TCP
+		- Cache
+			- List of User (Can be read through cache) 
+			- Info of chats or (recent conversation) for very low time (TTL)
+	- Websocket manager (WSM)
+		- Tells which user connected to which all users and there WS handlers 
+		- Redis 
+			- Stores list of users connected
+			- And U1 <->U2
+	- Message Service (MS)
+		- Repo of all messages in system
+		- Cassandra (Hbase) DB
+			- Can store lots of  Msg till the time it is not delivered to user
+			- Query pattern is less
+			- Can store read receiptas staus col in mesage table
+		- Whatsapp 
+			- Stores only message tilll the time it is delivered
+		- Return Message Id
+	- Flow
+		- U2 -> WS2; WM2 -U1, U1 -> Delivered  -> Message
+		- U1:U3:M2
+			- WS1, U3 - offline
+			- WS3 -> MS
+				- Read all message of U3 <- M2
+		- Race Condition
+			- U1, WSH1, M1-> U3 (just came online as WSH3 it was offline )
+			- U3 <-WSH3 <- MS (get all M)
+			- M1 -> MS
+			- So U3 will not get M1
+		- Fix race condition
+			- WSH can keeps polling on MS for all active users
+			- Net down, all msg store in local db of mobile, sqlite db
+	- Group Msg
+		- U1: G1 (Group 1) : M3 -> MS 
+		- MS -> Put message to Kafka topic
+	- Group Message Handler
+		- Kafka Handler ->
+		-  List of users from GS ->
+		- WSM : WSH of users -> 
+		- -> WSH of users
+	- Group Service (GS)
+		- Get list of user in Group
+		- 
+	- Uploading Content
+		- Compression
+		- U3:U2: Img
+		- Compress, Upload image to server, send server Id further
+		- Send to AS
+	- Asset Service (AS)
+		- Use S3 (data store)
+			- Use CDN for frequenlty acces image
+		- Stores content, Images & all
+		- Hash of image to prevent duplicate images
+	- User app
+		- User Service
+			- Profile pic
+			- User specific data
+			- MySql DB
+			- Redis
+		- Group Service
+			- Which group has which user
+			- Group MySql DB
+			- User in Group
+			- Admin or not
+			- Redis
+				- Read through redis
+		- Analytics Service
+			- All Event s
+				- Like person certain profile multipler times
+				- Talking about sports a lot
+			- Kafka ->
+			- Spark streamer to classify
+				- What are people talking about general
+			- Put data in Hadoop
+		- Last Seen Service
+			- Kafka ->
+			- Cassandra DB
+				- Extemrly high throughput / data
+				- Scale to high amount traffic
+			- Events 
+				- Spawn by app
+					- App connects to interent
+				- Spawn by user
+					- These are only look by Last Seen Service
+					- Opennig the app
+		- Monitoring
+			- CPU, Memory, Disk utilisation, Throughput
+			- Graphana
+			- Build Alerting on it
+			- Dyanmic add/remove nodes based on load
+
+
+
+
+## Notification Service which Scalable Enough
+
+- FR
+	- Send Notification
+	- Plugabe
+		- SNS, SQS, app notification
+		- Whatapp, SMS, Email
+	- SAAS
+		- Software as service which can be sell to customers
+		- Who is sending whom
+		- Rate limit
+		- Classifcation
+			- Transaction Notification
+			- Promotional Notification (should always have rate limit)
+	- Prioritisation
+		- OTP (Highest priority)
+		- Promotonal: (Low priority)
+- NFR
+	- Highly Available
+	- Many Clients, easy to add clients
+- HLD
+	- CLient 1,2..
+	- Notification Service
+		- Source user to destination user using this medium
+		- Put msg in kafka
+		- Basic Validation like content is not null
+	- Notification Validator & Priotizer
+		- Validation 
+		- Decide Priotiy of message
+			- OTP high priority > Transaction msg > Promotional msg
+		- Put msg as priority specfic topics of kafka (Goal is to have min lag high priority messages)
+	- Kafka
+	- Rate Limiter
+		- Limit sender & receiver client
+		- Use Keys to mantina timestamp of prev rquest
+		- Also count request for pay per request modal  
+		- Redis
+			- Inc & check threshold
+			- Inc & reporting & charges more
+	- Notification Handler & User Preferences
+		- Stores pref of user wether to receive notification via sms or email or ...
+		- Preference MySQL DB
+		- Talks to user service
+		- Put to another kafka for sending out
+	- User Service
+		- Get user data using user id like phone no, email for notification 
+	- Notification Handler 
+		- SMS Handler
+			- Vendors
+				- Asia
+					- SMS vendor 1
+					- SMS vendor 2
+				- Europe
+		- Email Handler
+			- Email Vendor
+		- In App Handler
+			- FireBase
+			- Apple Push Notification
+		- IVRS handler
+			- IVRS call
+		- Plugabilty (Add WhatsApp handler)
+	- Notification Tracker
+		- Keep track of all notification for audit purpose
+		- Cassandra
+			- Mostly write only thing
+		- Save all notification send
+	- # Can club service base on throughput
+	- Bulk Notification 
+		- All the user who order milk
+		- Bulk Notification UI
+		- LB
+		- Bulk Notification Service
+			- filter critera
+			- <- Query Enging gives users 
+		- User Transaction Data
+			- Transaction details of multiple  client data, like order buy , deliver state ..
+			- -> Kafka
+		- Transaction Data Parser
+			- ES / Mongo cluster
+			- Query Engine
+				- All people Bangalore who order in something
+				- Filter Criteria
+				- Gives List of user ->
+			- Other Consumer
+				- Rule Engine
+				- Fraud Engine
+				- Search Platform
+
+
+
+## Uber / Cab Booking System
+
+- FR
+	- See Cabs arround you
+	- ETA & approx price
+	- Book a cab
+	- Location Tracking
+- NFR
+	- Global
+	- Low latency
+	- High Availability
+		- Should not go down
+	- High Consitency
+	- High Scale
+		- 100 Mill user MAV 
+		- 14 milon rides daily
+- HLD
+	- Problem: Find closet cabs nearest to user
+	- City
+		- Divide into segments
+			- Rectangular segments
+			- Based on coordinate of cabs & user can find in which segements they belong
+		- Attach particular segment to Cab
+		- Map Service (MS)
+			- Dividing City to Segment
+			- Base Lat, Long tells which segment user or cab is
+			- Tells ETA, & can also calc route & distance
+			- Divide (in multiple parts if heavy traffice)
+			-  or merge (in case of low ) segment based on traffic
+			- Find surrounding segements
+	- User app
+		- LB
+		- User Service
+			- See User data
+				- Tirips of users <- TS
+			- User MySQL
+			- Redis (Read thorugh)
+		- Trips Service (TS)
+		- Cab Request Service
+			- Use to book cab
+			- Web socket connection with User
+		- Cab Finder Service
+			- Find cabs
+			- Use user segment & driver segement to nearby cabs to user
+	- Driver App
+		- LB
+		- Driver Service
+			- Update driver info
+			- Trips all driver (<-TS)
+			- Driver DB MySL
+			- Redis (Read thorugh)
+			- Send driver loc to  location service
+		- Location Service
+			- Web socket connection servers
+			- Query MS  (Map service) to find lat-long belongs to which  segement
+	- Customer - Driver
+		- Driver App
+		- LB
+		- WebSocket Handlers (WSH)
+			- Connect to each driver
+			- <-Driver App loc
+			- -> Trip info -> driver app
+		- WebSocket Manger
+			- Which WSH is connected which driver (stores this info in DB)
+			- Like tells WSH2 connected to D3
+			- Redis
+				- Which driver connected to what host id
+				- Driver Id - Host Id
+				- Host Id -  Driver Ids
+		- Location Service
+			- <- WSH <- Driver Loc
+			- Stores Drivers location in DB
+			- Cassandra
+				- Lots of drivers & lots of update happening
+			- Location type
+				- Driver location
+				- Route or points followed by driver
+			- Process based on distance is calculated
+			- <-> MS
+			- Redis
+				- Segments & drivers it have
+				- Surrounding Segments
+		- Trips Service (TS)
+			- Trips information
+			- Exposes all APIS's arround Trip
+				- Driver Trips
+				- Users Trips
+			- MySql : Live or Future Trips
+			- Cassandra: Old Trips
+		- Trips Archiver
+			- Moves Data from MySQL to Cassandra for Trip Service
+		- Customer Req App
+			- Cab Req Service (CRS)
+				- Source & Dest Lat-Long
+				- CS -> Driver 1 -> Customer App
+			- Cab Finder
+				- Source Lat-Long
+				- Query loc service , get Segment of Customer,
+				- -> notification -> kafka
+				- Find nearby drivers, query on segment & surrounding segment Via loc service
+					- Founds 5 -10 drivers
+				- Web socketManger -> WS handler -> Driver 
+				- Driver info -> CRS -> Customer App
+				- Update the trip -> TS
+			- Driver Priority Enigine
+				- Choose there driver from list of driver
+					- Modes of choosing
+						- Best Driver (if premium customer)
+						- First accepted driver (avg customer)
+						- Ask Driver Priority Eninge 
+		- Kafka
+			- Loc service event
+			- Trip update event
+			- Driver Event
+			- Spark Streaming Cluster
+				- Jobs
+				- Create Heat Map
+					- Certain location where scarcity of driver
+					- Driver can move there
+				- Hadoop cluster (DB)
+					- Run ML / Spark jobs Jobs 
+						- Customer classification
+							- Premium 
+							- Once in Live
+						- Driver classification
+							- Premium 
+							- Once in Live
+						- Driver Priority ML
+							- Rating
+							- ETA (Excpected, Actual)
+						- Fraud Engine
+							- Customer driver are same in all trips
+					- Maps Service
+						- <- Feed Traffic data <- Spark Jobs
+						- Condition of road
+							- Avg Speed
+							- Helps in better enhance ETA
+		- Payment Service
+			- -> Kafka -> Listen to trip completion event
+			- Payment MySQL
+			- API's to get payment related info for trips
+
+
+
+
+## Twitter System Design
+- FR
+	- Tweet: post content 140 char
+	- Re Tweet
+	- Follow: Unidirectional
+	- Search
+	- See tweet feeds
+- NFR
+	- Read heavy (100 times read over write)
+	- Fast Rendering
+	- Fast tweet (able post tweet fast )
+	- Low latency
+	- Highly Avaialble
+	- Lag ok in some cases (Don’t need high constiences. it ok see somebody tweet bit late))
+	- Scale
+		- 150 M DAV
+		- 350 M MAV
+		- 1.5 billon account
+		- 500 M tweets per day
+		- 5700 tweets / sec
+- HLD
+	- Category of User
+		- Famous 
+		- Active (Access twitter in last 3 days)
+		- Live
+		- Passive (not access in last 3 days)
+		- Inactive (Soft delete accounts)
+	- User  Flow
+		- #Read heavy system requires cache & precompute of things
+		- User Onboarding
+			- LB
+			- User Service
+				- User data
+				- Power login flow 
+				- MySQL (Mostly write system)
+				- Redis: 
+					- Image of used data, key: userId
+					- Power reads of users
+					- Read through read
+		- User Follow
+			- LB
+			- Graph Service
+				- Network how all in ecosystem is connected
+				- API's
+					- Followers
+					- Following
+				- My Sql
+					- User id, follower id
+					- Larger data so might need sharding
+				- Redis
+					- Followers
+					- Following
+					- Read thourgh redis
+			- User App/ website
+				- LB
+				- Analytics Service
+					- User events spenting more time cetian tweet
+				- Kafka
+				- User Live WebSockets (Notification)
+					- Immediately sent tweets of famous user to live user whom they follow
+				- user not live -> Kafka 
+	- Tweeting follow
+		- Tweet
+			- Text, image, video 
+		- Post Tweet
+		- LB
+		- Tweet Ingestion Service
+			- Storing text of service
+			- Cassandra (Hbase) cluster
+				- Massive amount of data
+			- Post tweet on Kafka
+		- Short Url Service
+			- Reduce link size in tweet
+		- Asset Service
+			- Responsible of all multimedia content
+		- Tweet Service
+			- API to display a tweet
+			- Also generates tweets timeline
+			- Sits over same Cassandra (Hbase) cluster
+		- UI
+			- User Timeline
+				- From list of tweets by you
+			- Home Timeline
+				- From list of people you follow
+		-  Precalculate/cache  timeline 
+		- Tweet Processor
+			- < -Kafka
+			- Kafka -> Tweet-> Timeline of followers
+			- On Tweet receive sent to timeline of  list  followers
+			- U1 -> T1, Followed By(U2,U3,U4), U2.timeline.push(T1))
+			- Query graph service
+			- Keeping timeline of  only active user in Redis
+			- Put event to Kafka for live user
+			- Live WS (Notification)
+			- Famouse user upate cache of other famouse user
+		- Timeline Service
+			- Passive User
+				- Query Graph user, get following list, query tweet service for following user, stores in redis cache, send timeline list
+			- For live user
+				- Tweet realtime using Live WS -> liver user UI
+			- Famous User
+				- Graph Service, Tweet Service find famous user tweet, update Reids & sent reposers to ui
+				- Famous user should know tweets of other famous user they follower
+			- Can be bottlenecks & handled well & so should be horizontal scalable
+				- Cassandra
+				- Redis 
+				- Kafka
+	- Search
+		- 
+		- Search consumer
+			- Gets <- kafka -< tweet ingestion service
+			- Adds data in ES cluster
+				- Text identify 
+				- Rank them in revelance
+				- Lucian to power all these
+		- Search Service
+			- Redis
+				- Keep searches for few mins
+		- LB
+		- Search UI
+	- Analytics
+		- Trending right now
+		- Kafka
+		- Spark Streaming 
+			- Hadoop cluster
+			- Most engaing tweet
+		- Trend Service
+			- Redis
+			- Trend base géographies
+		- Trend UI
+		- WeekLy Cron Jon
+			- <-Hadoop cluster
+			- Weeekly email for passive user
+				- ML based relevant tweets for them
+			- -> Notification Service -> User service
+
+
+
+## Facebook
+- FR
+	- Post
+	- Like, comment, share
+	- Add friends (Non directional)
+	- See timeline
+	- See a Users Posts (timeline), Profile
+	- Activity Log
+- NFR
+	- Very read heavy (100:1:: Read:Write)
+	- Fast rendering, posting
+	- Some lag is ok see friends post
+	- Access pattern 
+		- New post are seen a lot but older post viewership decays
+	- Global (Diverse language, internset speed & device power)
+	- Scale
+		- 1.7 B DAV } 95% Mobile
+		- 2.6 B MAV } 95% Mobile
+		- Events/min
+			- 150k image
+			- 300k statuses
+			- 500k comments
+- Users categroies
+	- Famous 
+	- Active (Access FB in last 3 days)
+	- Live (Online, actually browsing FB right now)
+	- Passive (Not Access FB since last 3 days)
+	- Inactive (soft deleted acc)
+- HLD
+	- User Onboarding UI
+		- User Service
+			- User info 
+			- All User relate API
+			- MySQL Cluster
+				- High Volume -> Sharding
+			- Redis
+				- Caches user info (Read through )
+				- Stores
+					- user details
+					- firends
+					- user type
+					- relevance tags
+					- last access time
+			- On update -> Kafka
+	- Add friend UI
+		- Group Service
+			- Which user connect which people
+			- MySQL Cluster
+				- High Volume -> Sharding
+			- Redis
+				- User friends
+	- Add Post
+		- Short URL
+			- Any URL to short URL
+			- Store analytics of it
+		- Asset Service
+			- Stores Image, video
+			- Modify resolution, aspect ratio of assets, file conversion
+			- Streaming content
+			- Access pattern: New post are access more & old one decay
+			- DB
+				- S3
+				- CDN: New assets, old assets suddenly becamae popular
+		- Post Ingestion Service
+			- <-?Short URL
+			- <-?Asset Service
+			- DB
+				- Posts Casandara
+					- Data is very high
+			- -> Kafka
+		- Post Service
+			- Read posts
+		- Analytics
+			- <-Kafka
+			- Tags a post based on content using ML modal
+			- -> Kafka
+		- Post Processor
+			- <-Kafka
+			- <- User & Group Service
+			- Categorise post based on user tags and sent post relvant user as per analytics
+			- ->RelvantPost -> Redis (Timeline of all users)
+			- Live users
+				- -> user live event -> Kafka
+		- Liver Users
+			- Web sockets with Live user app
+			- Show new posts
+		- Redis
+			- Timeline of users with time stamp
+			- Only have todays data
+		- Timeline Service
+			- <-Redis
+			- <- U & G service
+			- <- Archival Servcie (To fetch old data if user scrolls that much)
+			- Types
+				- User Timeline
+					- All the posts of particular user
+				- Own Timeline
+					- Create your timeline based on friends posts 
+					- And famous user posts
+				- <-
+		- Archival Service
+			- <-Redis Timeline
+			- Clear Redis
+			- -> Aggregate Timeline Cassandra
+			- U1:DT1: T1
+		- Aggregate Timeline Cassandra
+			- User id partion key
+			- Avoid creating hot spot
+	- Like Comment UI
+		- Like Service
+			- Have all likes info
+			- Cassandra
+				- Likes rows are stored in cassandra
+				- uid, postId, likeType
+				- uid, commentId, likeType
+			- Redis
+				- Count of likes for recent post (TTL)
+				- Store aggregate data
+			- -> Kafka
+		- Comment Service
+			- Power all comments
+			- Cassandra
+				- Stores all comments
+				- pid, cid, uid
+			- -> Kafka
+	- Activity UI
+		- Show all activitity of User
+		- Actvity Tracker
+			- <- Kafka
+			- Casandara
+				- uid, timestamp, action(commentID, postid)
+	- Search
+		- Same as twitter
+		- Elastic Search
+	- Analytics
+		- Posted content can classify to some TATS using ML
+		- Spark Streaming 
+			- <-Kafka
+			- -> Hadoop Cluster
+		- User profiling Job
+			- <-Spark Cluster <-Hadoop Cluster
+			- -> Kafka
+			- Create user profile based on tats of post
+		- Graph Weight Job
+			- Eg: I like Elon musk posts but he does not likes mine
+			- Out of my friends whos post I like most
+			- So create my profile according and as result sees that person posts more
+		- Trends
+			- Which words are in trend
+			- What kind of things people are talking about on interested in it
+			- <- Spark Streaming
+			- -> Redis
+	- NFR
+		- All service are scale horizontal
+		- Alerting Monitoring
+			- CPU usage
+			- Thorughput of DB, Disk space, Kafka & cache
+
+
+## Video Streaming Platform (Youtube / Netflix)
+- FR
+	- Upload Videos (You,me, prod houses)
+	- Users homepage
+	- Search
+	- Play Videos
+	- Support all devices 
+		- Support multiple formats (i)
+		-  dimensions (j)
+		- Bandwidth (k)
+		- Supp i*j*k possiblities
+- NFR
+	- No or minimal buffering
+		- Low latency
+		- High Availability
+	- Increase user session time
+		- Low latency
+		- High Availability
+		- Good recommendation engine
+- Consumers
+	- Clients
+		- Device of youtubr playing software
+	- User
+		- Viewing the content on client
+	- Prod house
+		- User uploading video
+- Client
+	- Get chunk of video & play that
+	- Meanwhile request next chunks
+	- Adaptive bit rate streaming
+		- If it finds that next chunks will not come on time, then it request low quality chunks 1080p -> 480p
+		- If it has lots of chunks then ask for more high quality chunks  480p -> 1080p
+- HLD
+	- UI for Prod House
+		- Place to upload content
+		- Small Videos
+			- upload button
+		- Movies
+			- 20-30GB
+			- FTTP server on prod house there end, they gave URL
+		- Asset Onboarding Service
+			- -> FTTPServr URL//Uploade Video -> S3 -> Cassandra -> Kafka
+			- Amazon S3 (Data store)
+				- Store videos
+			- Cassandra Cluster
+				- Video info
+				- Thumbnails
+				- Description
+		- Content Processor
+			- <->Kafka
+			- File Chunker
+				- Which divdes video into multiple chunks
+			- Content filter
+				- Filter out if worng things video
+					- Piracy
+					- Nudity
+					- Legal
+				- Parallel works on Chunk
+			- Content tagger
+				- Classifier
+				- Try to extract tags from video
+				- Create list of thumbnails
+			- Transcoder
+				- Convert video chunk to diff file formats
+			- Quality Converter
+				- Convert video chunks to diff video quality of chunks
+			- CDN Uploads
+				- Upload chunks on CDN
+				- CDN
+			-  All events are put in Kafka
+			- Spark Streaming
+				- Find tags in viedos
+		- Asset Service
+			- <->Kafka
+			- Reading move chunks info in cassandara clustter
+			- Cassandar clustter
+				- Hold comple video info & its chunks
+			- When whole upload process is done it notifiy in kafka
+		- Notifcation Service
+			- <-Kafka
+			- Notify user once upload processing completes
+	- User facing flow
+		- User device login UI 
+			- User Service
+				- All User info
+				- My Sql Cluster
+				- Redis
+					- uid, value(payload of user info)
+				- On each login it stores device & geography send event to kafka
+		- User Home & Search screen UI
+			-  Home Page Service
+			- Search Service
+			- Analytics Service
+				- If anlytics is saying if user  going to more videos then improve home page service
+				- If anlytics is saying if user  going beyond first search page then improve Search  service
+		- User Device playing Video
+			- Host identity service
+				- <-CDNs of video <-Asset Service
+				- Based on user location get most suitable CDN for streaming
+				- Types of CDN
+					- Main CDN
+						- Have all videos
+					- CDN optimised for local views
+						- Nearest based on Geography
+			- Stream stats logger
+				- Caputre Rating of video
+					- Based on length of watch duration (90%+) is good, less than (10-20% is bad)
+		- Search Consumer Service
+			- <-Kafka
+			- Elastic search
+				- Fuzzy search
